@@ -1,18 +1,18 @@
-# grid 
+# grid
 An app for elevating potlucks and community meals around the world.
 
 ## installation
 ```
-git clone https://github.com/mixersoft/grid.git [folder]
+git clone https://github.com/mixersoft/layout .git [folder]
 cd [folder]
 mkdir www
 ionic lib update
 bower install
-npm install 
+npm install
 # if you need to run as administrator, use `sudo npm install`
 
-# To continue dev in a new git repo 
-git remote rename origin seed 
+# To continue dev in a new git repo
+git remote rename origin seed
 git remote add origin [github repo]
 git push -u origin master
 
@@ -32,7 +32,7 @@ ionic plugin add https://github.com/driftyco/ionic-plugins-deploy -->
 
 
 # add Cordova platforms
-# note: this project has only been tested on iOS 
+# note: this project has only been tested on iOS
 ionic platform add ios
 ```
 
