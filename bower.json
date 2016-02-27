@@ -2,7 +2,7 @@
   "name": "ionic-tabs-starter-sass-jade-coffee",
   "private": "true",
   "devDependencies": {
-    "ionic": "driftyco/ionic-bower#1.2.1",
+    "ionic": "driftyco/ionic-bower#1.2.4",
     "angular-toastr": "~1.4.1",
     "robotodraft": "~1.1.0",
     "lodash": "~3.10.1",
@@ -15,10 +15,8 @@
     "ngCordova": "~0.1.23-alpha"
   },
   "resolutions": {
-    "angular": "1.4.3",
-    "angular-animate": "1.4.3",
     "meteor-client-side": "~0.2.2",
-    "angular-sanitize": "1.4.3",
-    "ionic": "1.2.1"
+    "angular-animate": "1.4.3",
+    "angular": "1.4.4"
   }
 }
