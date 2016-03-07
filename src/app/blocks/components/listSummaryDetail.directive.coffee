@@ -6,6 +6,7 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
     restrict: 'E'
     scope: {
       collection:"="
+      filter:"="
       itemHeight:"="
       summaryMinWidth: "="
       detailMaxWidth: "="
@@ -16,13 +17,12 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
     }
     controllerAs: '$listItemDelegate'
     controller: [
-      '$scope', '$window', '$ionicScrollDelegate', '$timeout'
-      ($scope, $window, $ionicScrollDelegate, $timeout)->
+      '$compile', '$scope', '$window', '$ionicScrollDelegate', '$timeout'
+      ($compile, $scope, $window, $ionicScrollDelegate, $timeout)->
 
         _styleEl = """
           <style class="item-style">
-          .list-item-summary .list-item-wrap > .item,
-          .list-item-summary .item.item-complex > .item-content {
+            \#{id}.list-item-summary .list-item-wrap > .item {
             min-height: 160px; }
         </style>
         """
@@ -36,7 +36,7 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
         vm.$detailEl = null   # set in postLink
         vm.selected = (item, $el)->
           if item?
-            console.log ["setSelected", item.id || item.name || item.title]
+            # console.log ["$listItemDelegate.setSelected()", item.id || item.name || item.title]
             vm._selected =
               if $scope.detailByReference
               then item
@@ -97,12 +97,15 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
               if $scope.showDetailInline == false
                 vm.$summaryEl.children().addClass('hide')
 
+              # $compile(vm.$detailEl.children())($scope)
+
               ngRepeatGridSvc.clearColSpec($selectedElContainer)
                 .removeClass('hide')
                 .addClass('selected')
                 .addClass(ngRepeatGridSvc.calcColWidth(null, $scope.detailMaxWidth))
                 # append $detailEl to $selectedElContainer
                 .append(vm.$detailEl)
+
 
               unSelectSummaryEl = vm.getAllSelected vm.$summaryEl, $selectedElContainer
               ngRepeatGridSvc.clearColSpec( unSelectSummaryEl )
@@ -127,7 +130,20 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
                   left: 0
                   top: ionic.DomUtil.getPositionInParent($selectedElContainer[0]).top
                 }
-                _ionScroll.scrollTo(vm.scrollPos.left, vm.scrollPos.top, true)
+                # NOTE: $ionicScrollDelegate normally does not work with <ion-modal-view>
+                # because $$filterFn = ()-> $ionicHistory.isActiveScope($scope)
+                #
+                isModalView = ionic.DomUtil.getParentWithClass( vm.$summaryEl[0], 'modal')
+                if isModalView
+                  _ionScroll._instances.forEach (instance)->
+                    console.warn "HACK: $ionScroll.scrollTo() inside <ion-modal-view>"
+                    if _ionScroll.handle == instance.$$delegateHandle
+                      return instance['scrollTo']
+                        .call(instance, vm.scrollPos.left, vm.scrollPos.top, true)
+                    return
+                else
+                  _ionScroll.scrollTo(vm.scrollPos.left, vm.scrollPos.top, true)
+
                 return
               , 300
           return
@@ -137,10 +153,11 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
         ## layout methods
         ##
         vm.setItemHeight = ($container, h)->
+          return if !vm.$summaryEl
           h ?= vm.itemHeight
           styleEl = $container[0].querySelector('style')
           if !styleEl
-            $container.prepend( _styleEl )
+            $container.prepend( _styleEl.replace(/{id}/g, vm.$summaryEl.attr('id')) )
             styleEl = $container[0].querySelector('style')
           styleEl.innerHTML = styleEl.innerHTML
             .replace(/(min-height:.)(\d+)(px)/, "$1"+h+"$3").trim()
@@ -185,7 +202,14 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
               $selectedElContainer =  angular.element target # .list-item-wrap
 
             # console.log $selectedElContainer
+            return if _.isEmpty $selectedElContainer
+
+
+            # event=null if vm.listItemDelegate.select() on activate()
+            return if not event instanceof MouseEvent
+
             if $selectedElContainer.hasClass('selected')
+              # unSelect
               vm.selected( null )
               vm.layout('summary', $selectedElContainer)
               $scope.onSelect?({
@@ -218,6 +242,7 @@ ListItemContainerDirective = (ngRepeatGridSvc)->
             return vm.getColWidth()
           'setItemHeight' : ()->
             throw new Error '$listItemDelegate.setItemHeight() not ready' # set in link
+          'filter': $scope.filter
         }
 
         return vm
@@ -253,7 +278,7 @@ ListItemContainerDirective.$inject = ['ngRepeatGridSvc']
 
 
 
-ListSummaryDirective = ($compile, $window, $controller, $ionicScrollDelegate)->
+ListSummaryDirective = ($filter, $window, $controller, $ionicScrollDelegate)->
   return {
     restrict: 'E'
     require: '^listItemContainer'
@@ -261,48 +286,60 @@ ListSummaryDirective = ($compile, $window, $controller, $ionicScrollDelegate)->
     replace: true
     template: """
       <div name="list-summary-wrap" class="list-item-summary row ng-repeat-grid">
-        <div class="list-item-wrap col" ng-class="$listItemDelegate.getColWidth()" ng-repeat="$item in collection" ng-transclude-parent="parent">
+        <div class="list-item-wrap col"
+          ng-class="$listItemDelegate.getColWidth()"
+          ng-repeat="$item in collection"
+          ng-transclude-parent="parent">
         </div>
       </div>
     """
     scope: {
       collection:"="
     }
-    link:
-      pre: (scope, element, attrs, controller, transclude) ->
-        controller['$summaryEl'] = element
-        return
-      post: (scope, element, attrs, controller, transclude) ->
-        scope.$listItemDelegate = controller['$listItemDelegate']
+    compile: (tElement, tAttrs, transclude)->
+      link = {
+        pre: (scope, element, attrs, controller, transclude) ->
+          controller['$summaryEl'] = element
+          controller['$summaryEl'].attr('id', 'list-item-container-'+element.scope().$id)
+          return
+        post: (scope, element, attrs, controller, transclude) ->
+          scope.$listItemDelegate = controller['$listItemDelegate']
 
-        if not attrs.collection?
-          # list-item-summary[collection] takes precedence
-          scope.$watch '$listItemDelegate.collection()', (newV, oldV)->
-            scope.collection = newV
-            scope.$broadcast 'list-item-summary:changed'
-            return
+          if not attrs.collection?
+            # list-item-summary[collection] takes precedence
+            scope.$watch '$listItemDelegate.collection()', (newV, oldV)->
 
-        controller.selected(null)
-        scope.dbg = {
-          'faceClick': (event, className)->
-            event.stopImmediatePropagation()
-            angular.element(
-              document.querySelector('.list-item-detail')
-            ).toggleClass(className)
-            return
-          'select' : controller.select
-          'close' : (event)->
-            event.stopImmediatePropagation()
-            target = angular.element event.currentTarget
-            $selectedElContainer = target.parent() # .list-item-wrap
-            controller.selected(null)
-            controller.layout('summary', $selectedElContainer)
+              filter = scope.$listItemDelegate.filter?.split(':')
+              if filter
+                scope.collection = $filter(filter.shift()).apply(this, [newV].concat(filter))
+              else
+                scope.collection = newV
+              scope.$broadcast 'list-item-summary:changed'
+              return
 
-        }
-        return
+          controller.selected(null)
+          scope.dbg = {
+            'faceClick': (event, className)->
+              event.stopImmediatePropagation()
+              angular.element(
+                document.querySelector('.list-item-detail')
+              ).toggleClass(className)
+              return
+            'select' : controller.select
+            'close' : (event)->
+              event.stopImmediatePropagation()
+              target = angular.element event.currentTarget
+              $selectedElContainer = target.parent() # .list-item-wrap
+              controller.selected(null)
+              controller.layout('summary', $selectedElContainer)
+
+          }
+          return
+      }
+      return link
   }
 
-ListSummaryDirective.$inject = ['$compile', '$window', '$controller', '$ionicScrollDelegate']
+ListSummaryDirective.$inject = ['$filter', '$window', '$controller', '$ionicScrollDelegate']
 
 
 
@@ -322,16 +359,11 @@ ListDetailDirective = ()->
     scope: {}
     link:
       pre: (scope, element, attrs, controller, transclude) ->
+        scope.$item = {}
         controller['$detailEl'] = element
         return
       post: (scope, element, attrs, controller, transclude) ->
         scope.$listItemDelegate = controller['$listItemDelegate']
-        scope.dbg = {
-          'click': (event)->
-            event.stopImmediatePropagation()
-            console.log ['ListDetailDirective.dbg.click', scope.$item.name]
-          'close': controller.close
-        }
         scope.$watch '$listItemDelegate.selected()', (newV, oldV)->
           scope.$item = newV
           # console.log [ "watch detail selected", newV]
@@ -340,11 +372,27 @@ ListDetailDirective = ()->
 ListDetailDirective.$inject = []
 
 ListItemDelegate = ()->
-  this.getByHandle = (handle)->
+  this.getByHandle = (handle, parentScope)->
     parents = document.getElementsByTagName('LIST-ITEM-CONTAINER')
     found = _.find parents, (parentEl)->
-      return parentEl if parentEl.getAttribute('handle') == handle
-      return parentEl if parentEl.getAttribute('scroll-handle') == handle
+      foundHandle = parentEl.getAttribute('handle') == handle ||
+        parentEl.getAttribute('scroll-handle') == handle
+      if foundHandle
+        return parentEl if !parentScope
+        # $ionicView caching will create multiple ion-scroll parents with same handle
+        # check that the <list-item-container> is a child of the given parentScope
+        checkScope = angular.element(parentEl).scope()
+        done = !checkScope || checkScope == parentScope
+        while not done
+          checkScope = checkScope.$parent
+          done = !checkScope || checkScope == parentScope
+
+        return parentEl if checkScope
+        # console.warn ["ListItemDelegate.getByHandle() WRONG handle from cached $ionicView"
+        #   parentScope.$id
+        #   angular.element(parentEl).scope().$id
+        # ]
+        return
       return
     return angular.element(found).scope?().$listItemDelegate
   this.getByChildEl = (child)->
